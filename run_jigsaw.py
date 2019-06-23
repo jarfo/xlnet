@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-NROWS = 1000
+NROWS = None
 
 from os.path import join
 from absl import flags
@@ -274,8 +274,6 @@ class JigsawProcessor(object):
     return self._create_examples(
         self._read_csv(os.path.join(data_dir, self.test_file)), "test")
 
-  def get_labels(self):
-    return ["0", "1"]
 
   def _create_examples(self, df, set_type):
     """Creates examples for the training and dev sets."""
@@ -284,7 +282,7 @@ class JigsawProcessor(object):
       guid = row['id']
       text_a = row[TEXT_COLUMN]
       if set_type == "test":
-        label = self.get_labels()[0]
+        label = np.zeros(len(self.label_column), dtype=np.float32)
       else:
         label = np.array(row[self.label_column].values, dtype=np.float32)
       examples.append(
@@ -307,8 +305,7 @@ class JigsawProcessor(object):
 
 
 def file_based_convert_examples_to_features(
-    examples, label_list, max_seq_length, tokenize_fn, output_file,
-    num_passes=1):
+    examples, max_seq_length, tokenize_fn, output_file, num_passes=1):
   """Convert a set of `InputExample`s to a TFRecord file."""
 
   # do not create duplicated records
@@ -624,7 +621,6 @@ def main(_):
   task_name = FLAGS.task_name.lower()
 
   processor = JigsawProcessor()
-  label_list = processor.get_labels() if not FLAGS.is_regression else None
 
   sp = spm.SentencePieceProcessor()
   sp.Load(FLAGS.spiece_model_file)
@@ -634,7 +630,8 @@ def main(_):
 
   run_config = model_utils.configure_tpu(FLAGS)
 
-  n_output = len(processor.label_column) - 1
+  n_labels = len(processor.label_column)
+  n_output = n_labels - 1
 
   model_fn = get_model_fn(n_output)
 
@@ -665,13 +662,13 @@ def main(_):
     tf.logging.info("Num of train samples: {}".format(len(train_examples)))
 
     file_based_convert_examples_to_features(
-        train_examples, label_list, FLAGS.max_seq_length, tokenize_fn,
+        train_examples, FLAGS.max_seq_length, tokenize_fn,
         train_file, FLAGS.num_passes)
 
     train_input_fn = file_based_input_fn_builder(
         input_file=train_file,
         seq_length=FLAGS.max_seq_length,
-        n_labels=n_output + 1,
+        n_labels=n_labels,
         is_training=True,
         drop_remainder=True)
 
@@ -701,7 +698,7 @@ def main(_):
     eval_file = os.path.join(FLAGS.output_dir, eval_file_base)
 
     file_based_convert_examples_to_features(
-        eval_examples, label_list, FLAGS.max_seq_length, tokenize_fn,
+        eval_examples, FLAGS.max_seq_length, tokenize_fn,
         eval_file)
 
     assert len(eval_examples) % FLAGS.eval_batch_size == 0
@@ -710,6 +707,7 @@ def main(_):
     eval_input_fn = file_based_input_fn_builder(
         input_file=eval_file,
         seq_length=FLAGS.max_seq_length,
+        n_labels=n_labels,
         is_training=False,
         drop_remainder=True)
 
@@ -763,19 +761,19 @@ def main(_):
     eval_file = os.path.join(FLAGS.output_dir, eval_file_base)
 
     file_based_convert_examples_to_features(
-        eval_examples, label_list, FLAGS.max_seq_length, tokenize_fn,
+        eval_examples, FLAGS.max_seq_length, tokenize_fn,
         eval_file)
 
     pred_input_fn = file_based_input_fn_builder(
         input_file=eval_file,
         seq_length=FLAGS.max_seq_length,
+        n_labels=n_labels,
         is_training=False,
         drop_remainder=False)
 
     predict_results = []
-    with tf.gfile.Open(os.path.join(predict_dir, "{}.tsv".format(
-        task_name)), "w") as fout:
-      fout.write("index\tprediction\n")
+    with tf.gfile.Open(os.path.join(predict_dir, "submission.csv"), "w") as fout:
+      fout.write("id,prediction\n")
 
       for pred_cnt, result in enumerate(estimator.predict(
           input_fn=pred_input_fn,
@@ -787,21 +785,9 @@ def main(_):
 
         logits = [float(x) for x in result["logits"].flat]
         predict_results.append(logits)
+        label_out = logits[0]
 
-        if len(logits) == 1:
-          label_out = logits[0]
-        elif len(logits) == 2:
-          if logits[1] - logits[0] > FLAGS.predict_threshold:
-            label_out = label_list[1]
-          else:
-            label_out = label_list[0]
-        elif len(logits) > 2:
-          max_index = np.argmax(np.array(logits, dtype=np.float32))
-          label_out = label_list[max_index]
-        else:
-          raise NotImplementedError
-
-        fout.write("{}\t{}\n".format(pred_cnt, label_out))
+        fout.write("{},{}\n".format(pred_cnt, label_out))
 
     predict_json_path = os.path.join(predict_dir, "{}.logits.json".format(
         task_name))
