@@ -439,8 +439,6 @@ def get_jigsaw_loss(
     FLAGS, features, n_output, is_training):
   """Loss for jigsaw task."""
 
-  bsz_per_core = tf.shape(features["input_ids"])[0]
-
   inp = tf.transpose(features["input_ids"], [1, 0])
   seg_id = tf.transpose(features["segment_ids"], [1, 0])
   inp_mask = tf.transpose(features["input_mask"], [1, 0])
@@ -771,6 +769,9 @@ def main(_):
         is_training=False,
         drop_remainder=False)
 
+    def sigmoid(x):
+      return 1 / (1 + np.exp(-x))
+
     predict_results = []
     with tf.gfile.Open(os.path.join(predict_dir, "submission.csv"), "w") as fout:
       fout.write("id,prediction\n")
@@ -787,7 +788,7 @@ def main(_):
         predict_results.append(logits)
         label_out = logits[0]
 
-        fout.write("{},{}\n".format(pred_cnt, label_out))
+        fout.write("{},{}\n".format(pred_cnt, sigmoid(label_out)))
 
     predict_json_path = os.path.join(predict_dir, "{}.logits.json".format(
         task_name))
