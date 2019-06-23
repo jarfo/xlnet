@@ -525,7 +525,7 @@ def get_model_fn(n_output):
       is_real_example = tf.cast(features["is_real_example"], dtype=tf.float32)
 
       #### Constucting evaluation TPUEstimatorSpec with new cache.
-      label_ids = tf.reshape(features['label_ids'], [-1])
+      label_ids = features["label_ids"]
 
       if FLAGS.is_regression:
         metric_fn = regression_metric_fn
@@ -548,7 +548,7 @@ def get_model_fn(n_output):
       return eval_spec
 
     elif mode == tf.estimator.ModeKeys.PREDICT:
-      label_ids = tf.reshape(features["label_ids"], [-1])
+      label_ids = features["label_ids"]
 
       predictions = {
           "logits": logits,
@@ -574,7 +574,7 @@ def get_model_fn(n_output):
     if FLAGS.use_tpu:
       #### Creating host calls
       if not FLAGS.is_regression:
-        label_ids = tf.reshape(features['label_ids'], [-1])
+        label_ids = features["label_ids"]
         predictions = tf.greater(logits, 0)
         is_correct = tf.equal(predictions, tf.cast(label_ids[:,0], tf.bool))
         accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
