@@ -25,8 +25,8 @@ import xlnet
 from data_utils import SEP_ID, VOCAB_SIZE, CLS_ID
 import model_utils
 import function_builder
-from classifier_utils import PaddingInputExample
-from classifier_utils import convert_single_example
+from classifier_utils import PaddingInputExample, InputFeatures
+from classifier_utils import SEG_ID_A, SEG_ID_CLS, SEG_ID_SEP, SEG_ID_PAD
 from prepro_utils import preprocess_text, encode_ids
 import pandas as pd
 import numpy as np
@@ -254,6 +254,70 @@ class InputExample(object):
     self.label = label
 
 
+def convert_single_example(ex_index, example, n_labels, max_seq_length,
+                              tokenize_fn):
+  """Converts a single `InputExample` into a single `InputFeatures`."""
+
+  if isinstance(example, PaddingInputExample):
+    return InputFeatures(
+        input_ids=[0] * max_seq_length,
+        input_mask=[1] * max_seq_length,
+        segment_ids=[0] * max_seq_length,
+        label_id=[0] * n_labels,
+        is_real_example=False)
+
+  tokens_a = tokenize_fn(example.text_a)
+  tokens_b = None
+
+  # Account for one [SEP] & one [CLS] with "- 2"
+  if len(tokens_a) > max_seq_length - 2:
+    tokens_a = tokens_a[-(max_seq_length - 2):]
+
+  tokens = []
+  segment_ids = []
+  for token in tokens_a:
+    tokens.append(token)
+    segment_ids.append(SEG_ID_A)
+  tokens.append(SEP_ID)
+  segment_ids.append(SEG_ID_A)
+
+  tokens.append(CLS_ID)
+  segment_ids.append(SEG_ID_CLS)
+
+  input_ids = tokens
+
+  # The mask has 0 for real tokens and 1 for padding tokens. Only real
+  # tokens are attended to.
+  input_mask = [0] * len(input_ids)
+
+  # Zero-pad up to the sequence length.
+  if len(input_ids) < max_seq_length:
+    delta_len = max_seq_length - len(input_ids)
+    input_ids = [0] * delta_len + input_ids
+    input_mask = [1] * delta_len + input_mask
+    segment_ids = [SEG_ID_PAD] * delta_len + segment_ids
+
+  assert len(input_ids) == max_seq_length
+  assert len(input_mask) == max_seq_length
+  assert len(segment_ids) == max_seq_length
+
+  label_id = example.label
+  if ex_index < 5:
+    tf.logging.info("*** Example ***")
+    tf.logging.info("guid: %s" % (example.guid))
+    tf.logging.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
+    tf.logging.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
+    tf.logging.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+    tf.logging.info("label: {} (id = {})".format(example.label, label_id))
+
+  feature = InputFeatures(
+      input_ids=input_ids,
+      input_mask=input_mask,
+      segment_ids=segment_ids,
+      label_id=label_id)
+  return feature
+
+
 class JigsawProcessor(object):
   def __init__(self):
     self.train_file = "train.csv"
@@ -279,8 +343,10 @@ class JigsawProcessor(object):
     """Creates examples for the training and dev sets."""
     examples = []
     for i in df.index:
-      guid = df.get_value(i,'id')
-      text_a = df.get_value(i,TEXT_COLUMN)
+      guid = df.at[i,'id']
+      text_a = df.at[i,TEXT_COLUMN]
+      if len(text_a) == 0:
+        text_a = '.'
       if set_type == "test":
         label = np.zeros(len(self.label_column), dtype=np.float32)
       else:
@@ -305,7 +371,7 @@ class JigsawProcessor(object):
 
 
 def file_based_convert_examples_to_features(
-    examples, max_seq_length, tokenize_fn, output_file, num_passes=1, shuffle=True):
+    examples, max_seq_length, tokenize_fn, output_file, num_passes=1, shuffle=True, n_labels=8):
   """Convert a set of `InputExample`s to a TFRecord file."""
 
   # do not create duplicated records
@@ -328,7 +394,7 @@ def file_based_convert_examples_to_features(
       tf.logging.info("Writing example {} of {}".format(ex_index,
                                                         len(examples)))
 
-    feature = convert_single_example(ex_index, example, None,
+    feature = convert_single_example(ex_index, example, n_labels,
                                      max_seq_length, tokenize_fn)
 
     def create_int_feature(values):
@@ -663,7 +729,7 @@ def main(_):
 
     file_based_convert_examples_to_features(
         train_examples, FLAGS.max_seq_length, tokenize_fn,
-        train_file, FLAGS.num_passes, shuffle=True)
+        train_file, FLAGS.num_passes, shuffle=True, n_labels=n_labels)
 
     train_input_fn = file_based_input_fn_builder(
         input_file=train_file,
@@ -699,7 +765,7 @@ def main(_):
 
     file_based_convert_examples_to_features(
         eval_examples, FLAGS.max_seq_length, tokenize_fn,
-        eval_file, shuffle=False)
+        eval_file, shuffle=False, n_labels=n_labels)
 
     assert len(eval_examples) % FLAGS.eval_batch_size == 0
     eval_steps = int(len(eval_examples) // FLAGS.eval_batch_size)
@@ -762,7 +828,7 @@ def main(_):
 
     file_based_convert_examples_to_features(
         eval_examples, FLAGS.max_seq_length, tokenize_fn,
-        eval_file, shuffle=False)
+        eval_file, shuffle=False, n_labels=n_labels)
 
     pred_input_fn = file_based_input_fn_builder(
         input_file=eval_file,
