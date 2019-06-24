@@ -222,11 +222,11 @@ def get_final_metric(dataset, model_name, POWER=-5, OVERALL_MODEL_WEIGHT=0.25):
     return (OVERALL_MODEL_WEIGHT * overall_auc) + ((1 - OVERALL_MODEL_WEIGHT) * bias_score), bias_df
 
 
-def jigsaw_read(path, nrows=None, train=False):
+def jigsaw_read(path, read_labels, nrows=None):
     df = pd.read_csv(path, nrows=nrows)
     df[TEXT_COLUMN] = df[TEXT_COLUMN].astype(str)
 
-    if train:
+    if read_labels:
         df = df.fillna(0)
         df[BOOL_TOXICITY_COLUMN] = df[TOXICITY_COLUMN] >= 0.5
         df[IDENTITY_COLUMNS] = df[IDENTITY_COLUMNS] >= 0.5
@@ -264,36 +264,36 @@ class JigsawProcessor(object):
 
   def get_train_examples(self, data_dir):
     return self._create_examples(
-        self._read_csv(os.path.join(data_dir, self.train_file), train=True), "train")
+        self._read_csv(os.path.join(data_dir, self.train_file), read_labels=True), "train")
 
   def get_dev_examples(self, data_dir):
     return self._create_examples(
-        self._read_csv(os.path.join(data_dir, self.dev_file)), "dev")
+        self._read_csv(os.path.join(data_dir, self.dev_file), read_labels=True), "dev")
 
   def get_test_examples(self, data_dir):
     return self._create_examples(
-        self._read_csv(os.path.join(data_dir, self.test_file)), "test")
+        self._read_csv(os.path.join(data_dir, self.test_file), read_labels=False), "test")
 
 
   def _create_examples(self, df, set_type):
     """Creates examples for the training and dev sets."""
     examples = []
-    for _, row in df.iterrows():
-      guid = row['id']
-      text_a = row[TEXT_COLUMN]
+    for i in df.index:
+      guid = df.get_value(i,'id')
+      text_a = df.get_value(i,TEXT_COLUMN)
       if set_type == "test":
         label = np.zeros(len(self.label_column), dtype=np.float32)
       else:
-        label = np.array(row[self.label_column].values, dtype=np.float32)
+        label = np.array(df.loc[i, self.label_column], dtype=np.float32)
       examples.append(
           InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
     return examples
 
   @classmethod
-  def _read_csv(cls, input_file, train=False):
+  def _read_csv(cls, input_file, read_labels):
     """Reads a tab separated value file."""
-    df = jigsaw_read(input_file, nrows=NROWS, train=train)
-    if train:
+    df = jigsaw_read(input_file, read_labels=read_labels, nrows=NROWS)
+    if read_labels:
         WEIGHT_COLUMNS = ['black', 'homosexual_gay_or_lesbian', 'white', 'muslim', 'jewish']
         weights = np.ones(len(df), dtype=np.byte)
         weights += df[WEIGHT_COLUMNS].any(axis=1)
@@ -305,7 +305,7 @@ class JigsawProcessor(object):
 
 
 def file_based_convert_examples_to_features(
-    examples, max_seq_length, tokenize_fn, output_file, num_passes=1):
+    examples, max_seq_length, tokenize_fn, output_file, num_passes=1, shuffle=True):
   """Convert a set of `InputExample`s to a TFRecord file."""
 
   # do not create duplicated records
@@ -317,7 +317,9 @@ def file_based_convert_examples_to_features(
 
   writer = tf.python_io.TFRecordWriter(output_file)
 
-  np.random.shuffle(examples)
+  if shuffle:
+    np.random.shuffle(examples)
+  
   if num_passes > 1:
     examples *= num_passes
 
@@ -499,7 +501,7 @@ def get_model_fn(n_output):
       def metric_fn(per_example_loss, label_ids, logits, is_real_example):
         predictions = tf.greater(logits, 0)
         eval_input_dict = {
-            'labels': label_ids,
+            'labels': label_ids[:,0],
             'predictions': predictions,
             'weights': is_real_example
         }
@@ -661,7 +663,7 @@ def main(_):
 
     file_based_convert_examples_to_features(
         train_examples, FLAGS.max_seq_length, tokenize_fn,
-        train_file, FLAGS.num_passes)
+        train_file, FLAGS.num_passes, shuffle=True)
 
     train_input_fn = file_based_input_fn_builder(
         input_file=train_file,
@@ -697,7 +699,7 @@ def main(_):
 
     file_based_convert_examples_to_features(
         eval_examples, FLAGS.max_seq_length, tokenize_fn,
-        eval_file)
+        eval_file, shuffle=False)
 
     assert len(eval_examples) % FLAGS.eval_batch_size == 0
     eval_steps = int(len(eval_examples) // FLAGS.eval_batch_size)
@@ -760,7 +762,7 @@ def main(_):
 
     file_based_convert_examples_to_features(
         eval_examples, FLAGS.max_seq_length, tokenize_fn,
-        eval_file)
+        eval_file, shuffle=False)
 
     pred_input_fn = file_based_input_fn_builder(
         input_file=eval_file,
