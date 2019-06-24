@@ -128,7 +128,7 @@ flags.DEFINE_string("predict_ckpt", default=None,
 
 # task specific
 flags.DEFINE_string("task_name", default="jigsaw", help="Task name")
-flags.DEFINE_integer("max_seq_length", default=128, help="Max sequence length")
+flags.DEFINE_integer("max_seq_length", default=512, help="Max sequence length")
 flags.DEFINE_integer("shuffle_buffer", default=2048,
       help="Buffer size used for shuffle.")
 flags.DEFINE_integer("num_passes", default=1,
