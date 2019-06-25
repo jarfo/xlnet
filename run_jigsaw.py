@@ -371,7 +371,7 @@ class JigsawProcessor(object):
 
 
 def file_based_convert_examples_to_features(
-    examples, max_seq_length, tokenize_fn, output_file, num_passes=1, shuffle=True, n_labels=8):
+    examples, max_seq_length, tokenize_fn, output_file, num_passes=1, n_labels=8):
   """Convert a set of `InputExample`s to a TFRecord file."""
 
   # do not create duplicated records
@@ -383,9 +383,6 @@ def file_based_convert_examples_to_features(
 
   writer = tf.python_io.TFRecordWriter(output_file)
 
-  if shuffle:
-    np.random.shuffle(examples)
-  
   if num_passes > 1:
     examples *= num_passes
 
@@ -725,11 +722,12 @@ def main(_):
     tf.logging.info("Use tfrecord file {}".format(train_file))
 
     train_examples = processor.get_train_examples(FLAGS.data_dir)
+    np.random.shuffle(train_examples)
     tf.logging.info("Num of train samples: {}".format(len(train_examples)))
 
     file_based_convert_examples_to_features(
         train_examples, FLAGS.max_seq_length, tokenize_fn,
-        train_file, FLAGS.num_passes, shuffle=True, n_labels=n_labels)
+        train_file, FLAGS.num_passes, n_labels=n_labels)
 
     train_input_fn = file_based_input_fn_builder(
         input_file=train_file,
@@ -765,7 +763,7 @@ def main(_):
 
     file_based_convert_examples_to_features(
         eval_examples, FLAGS.max_seq_length, tokenize_fn,
-        eval_file, shuffle=False, n_labels=n_labels)
+        eval_file, n_labels=n_labels)
 
     assert len(eval_examples) % FLAGS.eval_batch_size == 0
     eval_steps = int(len(eval_examples) // FLAGS.eval_batch_size)
@@ -828,7 +826,7 @@ def main(_):
 
     file_based_convert_examples_to_features(
         eval_examples, FLAGS.max_seq_length, tokenize_fn,
-        eval_file, shuffle=False, n_labels=n_labels)
+        eval_file, n_labels=n_labels)
 
     pred_input_fn = file_based_input_fn_builder(
         input_file=eval_file,
