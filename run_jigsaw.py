@@ -1,7 +1,6 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-NROWS = None
 
 from os.path import join
 from absl import flags
@@ -31,6 +30,10 @@ from prepro_utils import preprocess_text, encode_ids
 import pandas as pd
 import numpy as np
 from sklearn import metrics
+
+# Limit number of samples
+flags.DEFINE_integer("max_nrows", default=None,
+      help="Max number of training, evaluation o prediction samples")
 
 # Model
 flags.DEFINE_string("model_config_path", default=None,
@@ -358,7 +361,7 @@ class JigsawProcessor(object):
   @classmethod
   def _read_csv(cls, input_file, read_labels):
     """Reads a tab separated value file."""
-    df = jigsaw_read(input_file, read_labels=read_labels, nrows=NROWS)
+    df = jigsaw_read(input_file, read_labels=read_labels, nrows=FLAGS.max_nrows)
     if read_labels:
         WEIGHT_COLUMNS = ['black', 'homosexual_gay_or_lesbian', 'white', 'muslim', 'jewish']
         weights = np.ones(len(df), dtype=np.byte)
